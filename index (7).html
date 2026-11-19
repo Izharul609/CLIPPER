@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipping Studio</title>
+<style>
+:root{--bg:#181b21;--panel:#20242c;--raised:#2a2f39;--line:#343a46;--text:#e8eaef;--muted:#9aa1ae;--accent:#f0b440;--ink:#1d1604;--danger:#ff7a70;font-family:"Segoe UI",system-ui,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-size:15px;line-height:1.5;display:flex;flex-direction:column}
+a{color:inherit}h1,h2{margin:0;font-weight:600;letter-spacing:-.01em}h2{font-size:1.15rem}
+.muted{color:var(--muted)}.error{color:var(--danger)}
+button,select,input{font:inherit;color:inherit;background:var(--raised);border:1px solid var(--line);border-radius:6px;padding:7px 12px}
+button{cursor:pointer}button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:var(--ink);border-color:var(--accent);font-weight:600}
+button.ghost{background:none;border-color:transparent;color:var(--muted)}button.ghost:hover{color:var(--text)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.top{display:flex;align-items:center;gap:32px;padding:0 20px;height:48px;background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.top a{font-weight:700;text-decoration:none}
+.dash{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:32px;padding:28px;overflow:auto;align-items:start}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:28px 22px;display:grid;gap:10px;justify-items:start;background:var(--panel)}
+.drop.over{border-color:var(--accent)}.drop p{margin:0;color:var(--muted)}
+ul{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--line)}
+li{display:grid;grid-template-columns:1fr auto;gap:2px 16px;padding:14px 4px;border-bottom:1px solid var(--line);align-items:center}
+li .t{font-weight:600;text-decoration:none}li .t:hover{color:var(--accent)}
+li .m{color:var(--muted);font-size:.88rem}li .a{grid-column:2;grid-row:1/span 2}
+.editor{flex:1;min-height:0;display:grid;grid-template-rows:auto 1fr auto}
+.eh{display:flex;align-items:baseline;gap:14px;padding:12px 20px}.eh a{color:var(--muted);text-decoration:none}
+.stage{min-height:0;background:#0d0f13;display:grid;place-items:center}
+.stage video{max-width:100%;max-height:100%;cursor:pointer}
+.tr{background:var(--panel);border-top:1px solid var(--line);padding:12px 20px 14px;display:grid;gap:10px}
+.ct{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.bt{display:flex;gap:6px;flex-wrap:wrap}.clock{font-variant-numeric:tabular-nums;min-width:190px}
+input[type=range]{width:100%;padding:0;accent-color:var(--accent);background:none;border:0}
+@media(max-width:800px){.dash{grid-template-columns:1fr;padding:16px}}
+</style>
+</head>
+<body>
+<header class="top"><a href="#/">Clipping Studio</a></header>
+<div id="app" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
+<script>
+// ---- storage: videos stay in this browser (IndexedDB), nothing is uploaded ----
+const EXTS=['.mp4','.m4v','.mov','.webm','.mkv'];
+const dbp=new Promise((res,rej)=>{const r=indexedDB.open('clipping-studio',1);r.onupgradeneeded=()=>r.result.createObjectStore('projects',{keyPath:'id'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const tx=async(mode,fn)=>{const s=(await dbp).transaction('projects',mode).objectStore('projects');return new Promise((res,rej)=>{const q=fn(s);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(Math.floor(n)).padStart(2,'0');
+const tc=(s=0)=>{const m=Math.floor(s/60),x=s%60;return `${pad(m)}:${pad(x)}.${String(Math.floor((x%1)*100)).padStart(2,'0')}`};
+const size=n=>n>1024**3?(n/1024**3).toFixed(1)+' GB':Math.round(n/1024**2)+' MB';
+const app=document.getElementById('app');let cleanup=()=>{};
+
+function meta(file){return new Promise(r=>{const v=document.createElement('video'),u=URL.createObjectURL(file);const d=m=>{URL.revokeObjectURL(u);r(m)};v.preload='metadata';v.onloadedmetadata=()=>d({duration:v.duration,w:v.videoWidth,h:v.videoHeight});v.onerror=()=>d({});v.src=u})}
+
+async function importFiles(files,msg){
+  msg.className='muted';
+  for(const f of files){
+    const ext=f.name.slice(f.name.lastIndexOf('.')).toLowerCase();
+    if(!EXTS.includes(ext)){msg.className='error';msg.textContent=`"${f.name}" is not supported. Use MP4, MOV, M4V, WEBM or MKV.`;return}
+    msg.textContent=`Importing ${f.name}…`;
+    const m=await meta(f);
+    try{await tx('readwrite',s=>s.put({id:crypto.randomUUID(),name:f.name.replace(/\.[^.]+$/,''),size:f.size,duration:m.duration||null,w:m.w||null,h:m.h||null,createdAt:new Date().toISOString(),blob:f}))}
+    catch{msg.className='error';msg.textContent='Could not save this video in the browser. Free some disk space or try a shorter clip.';return}
+  }
+  msg.textContent='';dashboard();
+}
+
+async function dashboard(){
+  cleanup();cleanup=()=>{};
+  const all=(await tx('readonly',s=>s.getAll())).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+  app.innerHTML=`<main class="dash"><section style="display:grid;gap:16px"><div class="drop" id="drop"><h2>Import a video</h2><p>Drop a file here, or choose one. MP4, MOV, M4V, WEBM and MKV work.</p><button class="primary" id="pick">Choose file</button><input type="file" id="file" accept="video/*,.mkv" multiple hidden><span id="msg" role="status"></span></div><p class="muted">Your videos stay on this device, stored in this browser. Clearing site data removes them.</p></section><section><h2>Projects</h2>${all.length?'':'<p class="muted">No projects yet. Import a video to start clipping.</p>'}<ul>${all.map(p=>`<li><a class="t" href="#/project/${p.id}">${esc(p.name)}</a><span class="a"><button class="ghost" data-r="${p.id}">Rename</button><button class="ghost" data-d="${p.id}">Delete</button></span><span class="m">${p.duration?tc(p.duration).replace(/\.\d+$/,''):'unknown length'}${p.w?` · ${p.w}×${p.h}`:''} · ${size(p.size)}</span></li>`).join('')}</ul></section></main>`;
+  const msg=document.getElementById('msg'),file=document.getElementById('file'),drop=document.getElementById('drop');
+  document.getElementById('pick').onclick=()=>file.click();
+  file.onchange=()=>importFiles([...file.files],msg);
+  drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');
+  drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');importFiles([...e.dataTransfer.files],msg)};
+  app.querySelectorAll('[data-d]').forEach(b=>b.onclick=async()=>{const p=all.find(x=>x.id===b.dataset.d);if(confirm(`Delete "${p.name}"? The copy stored in this browser will be deleted.`)){await tx('readwrite',s=>s.delete(p.id));dashboard()}});
+  app.querySelectorAll('[data-r]').forEach(b=>b.onclick=async()=>{const p=all.find(x=>x.id===b.dataset.r),n=prompt('Project name',p.name);if(n&&n.trim()){p.name=n.trim();await tx('readwrite',s=>s.put(p));dashboard()}});
+}
+
+async function editor(id){
+  cleanup();
+  const p=await tx('readonly',s=>s.get(id));
+  if(!p){app.innerHTML='<main style="padding:28px"><p class="error">Project not found.</p><a href="#/">Back to projects</a></main>';return}
+  const url=URL.createObjectURL(p.blob),F=1/30;
+  app.innerHTML=`<main class="editor"><div class="eh"><a href="#/">Projects</a><h1>${esc(p.name)}</h1></div><div class="stage"><video id="v" src="${url}" preload="metadata"></video><p id="err" class="error" style="display:none;padding:20px"></p></div><div class="tr"><input type="range" id="seek" min="0" max="0" step="0.01" value="0" aria-label="Position"><div class="ct"><span class="clock" id="clock">00:00.00</span><span class="bt"><button data-s="-5">−5s</button><button data-f="-1">◂ frame</button><button class="primary" id="pp">Play</button><button data-f="1">frame ▸</button><button data-s="5">+5s</button></span><label class="muted">Speed <select id="rate">${[.5,1,1.25,1.5,2].map(r=>`<option value="${r}"${r===1?' selected':''}>${r}×</option>`).join('')}</select></label></div></div></main>`;
+  const v=document.getElementById('v'),seek=document.getElementById('seek'),clock=document.getElementById('clock'),pp=document.getElementById('pp');
+  const go=t=>{v.currentTime=Math.max(0,Math.min(v.duration||0,t))},tog=()=>v.paused?v.play():v.pause();
+  v.onloadedmetadata=()=>seek.max=v.duration;
+  v.ontimeupdate=()=>{seek.value=v.currentTime;clock.textContent=`${tc(v.currentTime)} / ${tc(v.duration)}`};
+  v.onplay=()=>pp.textContent='Pause';v.onpause=()=>pp.textContent='Play';v.onclick=tog;pp.onclick=tog;
+  v.onerror=()=>{v.style.display='none';const e=document.getElementById('err');e.style.display='block';e.textContent='This browser cannot play this video format. MP4 (H.264) works best.'};
+  seek.oninput=()=>go(Number(seek.value));
+  document.getElementById('rate').onchange=e=>v.playbackRate=Number(e.target.value);
+  app.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>go(v.currentTime+Number(b.dataset.s)));
+  app.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>go(v.currentTime+F*Number(b.dataset.f)));
+  const key=e=>{if(['INPUT','SELECT'].includes(e.target.tagName)&&e.target.type!=='range')return;const st=e.shiftKey?F:5;
+    if(e.code==='Space'||e.key==='k'){e.preventDefault();tog()}
+    else if(e.key==='ArrowLeft'||e.key==='j'){e.preventDefault();go(v.currentTime-st)}
+    else if(e.key==='ArrowRight'||e.key==='l'){e.preventDefault();go(v.currentTime+st)}};
+  window.addEventListener('keydown',key);
+  cleanup=()=>{window.removeEventListener('keydown',key);URL.revokeObjectURL(url)};
+}
+
+function route(){const m=/^#\/project\/([\w-]+)/.exec(location.hash);m?editor(m[1]):dashboard()}
+window.addEventListener('hashchange',route);route();
+</script>
+</body>
+</html>
